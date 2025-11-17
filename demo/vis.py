@@ -134,14 +134,55 @@ def get_pose3D(video_path, output_dir):
     args.n_joints, args.out_joints = 17, 17
 
     ## Reload 
-    model = nn.DataParallel(Model(args=args)).cuda()
+    cuda_available = torch.cuda.is_available()
+    print(f"CUDA available in get_pose3D: {cuda_available}")
+    if cuda_available:
+        print(f"CUDA device count: {torch.cuda.device_count()}")
+        print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+    
+    device = torch.device('cuda' if cuda_available else 'cpu')
+    print(f"Using device: {device}")
+    
+    base_model = Model(args=args)
+    
+    # Always use DataParallel when CUDA is available (checkpoint expects it)
+    if cuda_available:
+        model = nn.DataParallel(base_model).to(device)
+    else:
+        model = base_model.to(device)
 
     model_dict = model.state_dict()
     # Put the pretrained model of PoseFormerV2 in 'checkpoint/']
-    model_path = sorted(glob.glob(os.path.join(args.previous_dir, '27_243_45.2.bin')))[0]
+    # model_path = sorted(glob.glob(os.path.join(args.previous_dir, '27_243_45.2.bin')))
+    model_path = "./demo/lib/checkpoint/27_243_45.2.bin"
 
-    pre_dict = torch.load(model_path)
-    model.load_state_dict(pre_dict['model_pos'], strict=True)
+    map_location = device
+    pre_dict = torch.load(model_path, map_location=map_location, weights_only=False)
+    
+    # Handle DataParallel checkpoint mismatch
+    state_dict = pre_dict['model_pos']
+    from collections import OrderedDict
+    new_state_dict = OrderedDict()
+    
+    # Check if we need to add or remove "module." prefix
+    checkpoint_has_module = any(k.startswith('module.') for k in state_dict.keys())
+    model_has_module = isinstance(model, nn.DataParallel)
+    
+    if checkpoint_has_module and not model_has_module:
+        # Remove "module." prefix
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith('module.') else k
+            new_state_dict[name] = v
+    elif not checkpoint_has_module and model_has_module:
+        # Add "module." prefix
+        for k, v in state_dict.items():
+            name = 'module.' + k if not k.startswith('module.') else k
+            new_state_dict[name] = v
+    else:
+        # No change needed
+        new_state_dict = state_dict
+    
+    model.load_state_dict(new_state_dict, strict=True)
 
     model.eval()
 
@@ -153,6 +194,7 @@ def get_pose3D(video_path, output_dir):
 
     ## 3D
     print('\nGenerating 3D pose...')
+    keypoints_3D = []
     for i in tqdm(range(video_length)):
         ret, img = cap.read()
         if img is None:
@@ -188,7 +230,7 @@ def get_pose3D(video_path, output_dir):
         
         input_2D = input_2D[np.newaxis, :, :, :, :]
 
-        input_2D = torch.from_numpy(input_2D.astype('float32')).cuda()
+        input_2D = torch.from_numpy(input_2D.astype('float32')).to(device)
 
         N = input_2D.size(0)
 
@@ -204,6 +246,8 @@ def get_pose3D(video_path, output_dir):
 
         output_3D[:, :, 0, :] = 0
         post_out = output_3D[0, 0].cpu().detach().numpy()
+        keypoints_3D.append(post_out)
+        # print(f'Output 3D shape: {output_3D.shape}, post_out shape: {post_out.shape}, output 3D sample: {output_3D[0]}, post out sample: {post_out}')
 
         rot =  [0.1407056450843811, -0.1500701755285263, -0.755240797996521, 0.6223280429840088]
         rot = np.array(rot, dtype='float32')
@@ -231,7 +275,9 @@ def get_pose3D(video_path, output_dir):
         plt.savefig(output_dir_3D + str(('%04d'% i)) + '_3D.png', dpi=200, format='png', bbox_inches = 'tight')
         plt.clf()
         plt.close(fig)
-        
+    
+    output_npz = output_dir + 'keypoints_3D.npz'
+    np.savez_compressed(output_npz, reconstruction=keypoints_3D)
     print('Generating 3D pose successful!')
 
     ## all
@@ -274,10 +320,31 @@ def get_pose3D(video_path, output_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--video', type=str, default='sample_video.mp4', help='input video')
-    parser.add_argument('--gpu', type=str, default='0', help='input video')
+    parser.add_argument('--gpu', type=str, default='0', help='GPU device ID (set CUDA_VISIBLE_DEVICES before running if needed)')
     args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    # Note: CUDA_VISIBLE_DEVICES must be set BEFORE importing torch
+    # Since torch is imported at the top, setting it here won't work
+    # Set it in your environment before running: $env:CUDA_VISIBLE_DEVICES="0" (PowerShell) or export CUDA_VISIBLE_DEVICES=0 (bash)
+    
+    # Verify CUDA availability
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device count: {torch.cuda.device_count()}")
+        print(f"Current device: {torch.cuda.current_device()}")
+        print(f"Device name: {torch.cuda.get_device_name(0)}")
+        if "CUDA_VISIBLE_DEVICES" in os.environ:
+            print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
+    else:
+        print("WARNING: CUDA is not available!")
+        print("This might be because:")
+        print("  1. CUDA_VISIBLE_DEVICES was set incorrectly")
+        print("  2. PyTorch was installed without CUDA support")
+        print("  3. GPU drivers are not installed")
+        print("\nTo use GPU, set CUDA_VISIBLE_DEVICES BEFORE running Python:")
+        print("  PowerShell: $env:CUDA_VISIBLE_DEVICES='0'")
+        print("  Bash: export CUDA_VISIBLE_DEVICES=0")
+        print("\nOr don't set it at all to use the default GPU")
 
     video_path = './demo/video/' + args.video
     video_name = video_path.split('/')[-1].split('.')[0]

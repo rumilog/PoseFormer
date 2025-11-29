@@ -1,0 +1,9 @@
+numpy
+scipy
+fastdtw
+Pillow
+matplotlib
+gradio
+opencv-python
+torch
+torchvision

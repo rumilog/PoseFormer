@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoachAI Platform - Personalized Form Analysis</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Font Awesome 6 for stable icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLMDJ8C+aR09O7m2/4q6gU/3j3A/3t4T5t1m3e9Z1B+w+T4dJ+K4L7mO8X4w4+w4g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    
+    <!-- Load React and ReactDOM from CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Load Babel for JSX/ES6 support -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Custom styles for the Inter font and smooth transitions */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .persona-card:hover {
+            transform: translateY(-2px); /* Lift effect */
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15); /* Stronger shadow */
+        }
+        .fa-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- Score Gauge Specific Styles (Static CSS) --- */
+        .score-ring {
+            stroke-dasharray: 440; /* Circumference of the circle (2 * PI * 70 = approx 439.8) */
+            transition: stroke-dashoffset 1.5s ease-out;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+            stroke-linecap: round;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useCallback, useMemo } = React;
+        
+        // --- CONFIGURATION AND CORE LOGIC ---
+
+        // The front-end now calls the local PHP proxy script, NOT the Gemini API directly.
+        const PROXY_URL = "/gemini_proxy.php"; 
+
+        const PERSONAS = {
+            "Hype Beast": {
+                desc: "Ultra-motivational, energetic, uses modern slang and emojis.",
+                color: 'bg-amber-500 hover:bg-amber-600',
+                icon: '🔥',
+                systemInstruction: "You are The Hype Beast. Your tone is ultra-motivational, energetic, and uses enthusiastic modern slang. You focus on confidence, confidence, confidence, bringing the energy, and framing corrections as leveling up. Use many emojis and exclamation points. Make the user feel like a star. DO NOT use LaTeX formatting like $...$ for scores or percentages.",
+            },
+            "Data Scientist": {
+                desc: "Precise, objective terms, focused on metrics, efficiency, and clear technical advice.",
+                color: 'bg-indigo-500 hover:bg-indigo-600',
+                icon: '📊',
+                systemInstruction: "You are The Data Scientist. You speak in precise, objective terms. Your feedback uses specific metrics and quantified improvement. Translate complex biomechanical terms into clear, actionable, technical advice that a novice can understand. Use a formal, structured report format. DO NOT use LaTeX formatting like $...$ for scores or percentages.",
+            },
+            "No-Nonsense Pro": {
+                desc: "Direct, challenging, slightly impatient. Demands immediate correction and higher standards.",
+                color: 'bg-red-500 hover:bg-red-600',
+                icon: '⚡',
+                systemInstruction: "You are The No-Nonsense Pro. You are direct, challenging, and slightly impatient with wasted effort. Your language is concise and demanding. Emphasize immediate correction and demand a higher standard of execution. Focus on 'why' the bad form wastes energy and must be fixed NOW. DO NOT use LaTeX formatting like $...$ for scores or percentages.",
+            },
+            "Mindful Aligner": {
+                desc: "Calm, centered, focuses on internal body awareness, breath, and gentle adjustment.",
+                color: 'bg-emerald-500 hover:bg-emerald-600',
+                icon: '🧘',
+                systemInstruction: "You are The Mindful Aligner. Your tone is calm, centered, and encouraging. You focus on connecting movement to breath, finding internal stability, and making gentle, internal adjustments to achieve proper alignment. Use soft, encouraging language. DO NOT use LaTeX formatting like $...$ for scores or percentages.",
+            }
+        };
+
+        const EXERCISE_HINTS = {
+            "pushup": {
+                "core": "Your hips might be sagging or piking up. Brace your abs like you're about to be punched to keep a straight line.",
+                "right_arm": "Check your right elbow flare. Keep it closer to a 45-degree angle from your body. Ensure your right hand is placed directly under your shoulder.",
+                "left_arm": "Check your left elbow flare. Keep it closer to a 45-degree angle from your body. Ensure your left hand is placed directly under your shoulder.",
+                "torso": "Keep your chest leading the movement, not your head. Ensure you are lowering your whole body as a single unit."
+            }
+        };
+
+        const getPerformanceTier = (score) => {
+            if (score >= 90.0) return "Excellent";
+            if (score >= 70.0) return "Good";
+            if (score >= 40.0) return "Needs Improvement";
+            return "Critical Adjustment Needed";
+        };
+
+        const analyzeSymmetry = (bodyPartsDetails) => {
+            const rErr = bodyPartsDetails?.right_arm?.position_error_avg || 0;
+            const lErr = bodyPartsDetails?.left_arm?.position_error_avg || 0;
+            
+            if (Math.abs(rErr - lErr) > 0.2) {
+                const worseSide = rErr > lErr ? "Right" : "Left";
+                return `Symmetry Alert: Your ${worseSide} arm is deviating significantly more than your other arm. Focus on pushing evenly.`;
+            }
+            return null;
+        };
+
+        const generateObjectiveReport = (data) => {
+            if (!data || !data.scores || !data.metrics) return null;
+
+            const scores = data.scores;
+            const metrics = data.metrics;
+            const exerciseType = data.exercise?.type || 'unknown';
+            const bodyPartsScores = scores.body_parts || {};
+            const bodyPartsDetails = metrics.body_part_details || {};
+
+            let reportLines = [];
+
+            // 1. Summary
+            const overallScore = scores.overall || 0;
+            const tier = getPerformanceTier(overallScore);
+            const alignmentQuality = (metrics.alignment_quality || 0) * 100;
+
+            reportLines.push(`SUMMARY: Performance Level: ${tier} (Score: ${overallScore.toFixed(1)}/100). Alignment Quality: ${alignmentQuality.toFixed(1)}%.`);
+
+            // 2. Priority Fix
+            if (Object.keys(bodyPartsScores).length > 0) {
+                const [weakestPart, lowestScore] = Object.entries(bodyPartsScores).reduce((a, b) => a[1] < b[1] ? a : b);
+                reportLines.push(`PRIORITY FIX: Main focus is ${weakestPart.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} (Score: ${lowestScore.toFixed(1)}).`);
+            }
+
+            // 3. Detailed Breakdown
+            reportLines.push("\nBREAKDOWN:");
+            const hints = EXERCISE_HINTS[exerciseType] || {};
+            
+            for (const [part, score] of Object.entries(bodyPartsScores)) {
+                const details = bodyPartsDetails[part] || {};
+                const errorAvg = details.position_error_avg || 0;
+                const inTolerance = details.in_tolerance_percentage || 0;
+                const specificHint = hints[part] || "";
+                
+                reportLines.push(`- ${part.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} (Score ${score.toFixed(1)}): Error Avg: ${errorAvg.toFixed(2)}. In Tolerance: ${inTolerance.toFixed(1)}%. Recommended Fix: ${specificHint}`);
+            }
+
+            // 4. Coaching Tips
+            const symmetryIssue = analyzeSymmetry(bodyPartsDetails);
+            if (symmetryIssue) {
+                reportLines.push("\nCOACHING TIPS:");
+                reportLines.push(`- ${symmetryIssue}`);
+            }
+                
+            return reportLines.join("\n");
+        };
+
+        // --- DYNAMIC SCORE COMPONENT ---
+
+        const ScoreGauge = ({ score }) => {
+            const normalizedScore = Math.max(0, Math.min(100, score)); // Ensure score is 0-100
+            const circumference = 440; // Defined in CSS
+            const dashoffset = circumference - (normalizedScore / 100) * circumference;
+
+            let colorClass = 'text-red-500'; // Critical
+            let ringColor = 'stroke-red-500';
+            if (normalizedScore >= 90) {
+                colorClass = 'text-emerald-500'; // Excellent
+                ringColor = 'stroke-emerald-500';
+            } else if (normalizedScore >= 70) {
+                colorClass = 'text-yellow-500'; // Good
+                ringColor = 'stroke-yellow-500';
+            } else if (normalizedScore >= 40) {
+                colorClass = 'text-amber-500'; // Needs Improvement
+                ringColor = 'stroke-amber-500';
+            }
+
+            const tier = getPerformanceTier(normalizedScore);
+
+            return (
+                <div className="flex flex-col items-center justify-center p-4">
+                    <div className="relative w-40 h-40">
+                        <svg className="w-full h-full" viewBox="0 0 160 160">
+                            {/* Background track */}
+                            <circle 
+                                className="text-gray-200" 
+                                strokeWidth="15" 
+                                stroke="currentColor" 
+                                fill="transparent" 
+                                r="70" 
+                                cx="80" 
+                                cy="80" 
+                            />
+                            {/* Animated ring */}
+                            <circle 
+                                className={`score-ring ${ringColor}`}
+                                strokeWidth="15" 
+                                fill="transparent" 
+                                r="70" 
+                                cx="80" 
+                                cy="80" 
+                                style={{ strokeDashoffset: dashoffset }}
+                            />
+                        </svg>
+                        <div className={`absolute inset-0 flex flex-col items-center justify-center`}>
+                            <p className={`text-4xl font-extrabold ${colorClass}`}>{normalizedScore.toFixed(0)}</p>
+                            <p className="text-sm font-semibold text-gray-500 mt-[-4px]">% Score</p>
+                        </div>
+                    </div>
+                    <p className={`mt-3 text-xl font-bold ${colorClass}`}>{tier}</p>
+                </div>
+            );
+        };
+
+
+        // --- COMPONENTS ---
+
+        const Card = ({ title, children, className = '' }) => (
+            <div className={`bg-white shadow-2xl rounded-2xl p-6 transition-all duration-300 ${className}`}>
+                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                    <i className="fa-solid fa-chart-line w-6 h-6 mr-2 text-indigo-600 fa-icon"></i>
+                    {title}
+                </h2>
+                {children}
+            </div>
+        );
+
+        const PersonaCard = ({ name, desc, color, selected, onClick, icon }) => (
+            <div 
+                className={`p-4 rounded-xl border-4 transition-all duration-300 cursor-pointer persona-card 
+                            ${selected 
+                                ? 'border-amber-400 bg-amber-50 shadow-lg scale-[1.02] transform' 
+                                : 'border-gray-200 hover:border-amber-300 hover:bg-gray-50 bg-white'}`}
+                onClick={onClick}
+            >
+                <div className="flex items-center mb-2">
+                    <span className="text-2xl mr-3">{icon}</span>
+                    <h3 className={`font-extrabold text-gray-800 ${selected ? 'text-amber-800' : ''}`}>{name}</h3>
+                </div>
+                <p className="text-sm text-gray-600">{desc}</p>
+            </div>
+        );
+
+        const FileInput = ({ onFileLoad, loading }) => {
+            const [fileName, setFileName] = useState(null);
+            const [error, setError] = useState(null);
+            const [showMessage, setShowMessage] = useState(false);
+            const [messageContent, setMessageContent] = useState('');
+
+            const handleMessageBoxClose = () => {
+                setShowMessage(false);
+                setMessageContent('');
+            };
+
+            const showCustomMessage = (content) => {
+                setMessageContent(content);
+                setShowMessage(true);
+            };
+
+            const handleFileChange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    loadFile(file);
+                }
+            };
+
+            const loadFile = (file) => {
+                if (file.type !== "application/json") {
+                    showCustomMessage("Invalid file type. Please upload a JSON file.");
+                    setFileName(null);
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        onFileLoad(data);
+                        setFileName(file.name);
+                        setError(null);
+                    } catch (err) {
+                        showCustomMessage("Error parsing JSON file. Please check file format.");
+                        setFileName(null);
+                        onFileLoad(null);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            return (
+                <Card title="1. Load Performance Data" className="bg-white">
+                    {showMessage && (
+                        <CustomMessage content={messageContent} onClose={handleMessageBoxClose} />
+                    )}
+                    <label className="flex items-center justify-center p-8 border-4 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-all">
+                        <input type="file" accept=".json" onChange={handleFileChange} className="hidden" disabled={loading} />
+                        <div className="text-center">
+                            <i className="fa-solid fa-upload w-8 h-8 mx-auto text-indigo-500 fa-icon"></i>
+                            <p className="mt-2 text-base text-gray-700 font-medium">Click to upload JSON file</p>
+                            {fileName && <p className="mt-1 text-sm text-green-600 font-semibold flex items-center justify-center"><i className='fa-solid fa-check-circle w-4 h-4 mr-1 fa-icon'></i> {fileName}</p>}
+                            {error && <p className="mt-1 text-sm text-red-600 font-semibold flex items-center justify-center"><i className='fa-solid fa-times w-4 h-4 mr-1 fa-icon'></i> {error}</p>}
+                        </div>
+                    </label>
+                    <MockDataLoader onFileLoad={onFileLoad} loading={loading} setFileName={setFileName} setError={setError} />
+                </Card>
+            );
+        };
+
+        const CustomMessage = ({ content, onClose }) => (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-xl shadow-2xl max-w-sm mx-4 transform transition-all duration-300 scale-100">
+                    <h3 className="text-xl font-bold text-red-600 mb-3 flex items-center"><i className="fa-solid fa-times w-5 h-5 mr-2 fa-icon"></i> Error</h3>
+                    <p className="text-gray-700 mb-4">{content}</p>
+                    <button 
+                        onClick={onClose} 
+                        className="w-full py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        );
+
+
+        const MockDataLoader = ({ onFileLoad, loading, setFileName, setError }) => {
+            const mockData = useMemo(() => ({
+                "status": "success",
+                "exercise": { "type": "pushup", "reference": "pushup", "user_video": "user.mp4" },
+                "scores": {
+                    "overall": 5.88, "relevant": 13.33,
+                    "body_parts": { "core": 33.33, "right_arm": 0.0, "left_arm": 0.0, "torso": 20.0 }
+                },
+                "metrics": {
+                    "frames": { "user": 300, "reference": 325, "aligned": 325 },
+                    "alignment_quality": 0.318,
+                    "body_part_details": {
+                        "right_arm": { "position_error_avg": 0.8837, "position_error_max": 1.5918, "tolerance_threshold": 0.02, "in_tolerance_percentage": 0.0 },
+                        "left_arm": { "position_error_avg": 0.5523, "position_error_max": 1.1628, "tolerance_threshold": 0.02, "in_tolerance_percentage": 0.0 },
+                        "torso": { "position_error_avg": 0.7517, "position_error_max": 1.9766, "tolerance_threshold": 0.02, "in_tolerance_percentage": 20.0 },
+                        "core": { "position_error_avg": 0.4419, "position_error_max": 1.4002, "tolerance_threshold": 0.02, "in_tolerance_percentage": 33.3 }
+                    }
+                }
+            }), []);
+
+            const handleLoadMock = () => {
+                onFileLoad(mockData);
+                setFileName("Mock Pushup Data");
+                setError(null);
+            };
+
+            return (
+                <button 
+                    onClick={handleLoadMock} 
+                    disabled={loading}
+                    className="w-full mt-4 py-3 px-4 text-base font-semibold rounded-xl text-indigo-700 bg-indigo-200 hover:bg-indigo-300 transition-colors disabled:opacity-50"
+                >
+                    Load Sample (Mock Data)
+                </button>
+            );
+        };
+
+        const ResultsDisplay = ({ feedback, loading, selectedPersona }) => {
+            const [rawVisible, setRawVisible] = useState(false);
+
+            if (!feedback && !loading) {
+                return <div className="text-gray-500 italic p-4 text-center text-lg">Your personalized report will appear here.</div>;
+            }
+
+            if (loading) {
+                return (
+                    <div className="flex flex-col items-center justify-center h-64 text-indigo-600">
+                        <i className="fa-solid fa-sync-alt w-10 h-10 mr-2 animate-spin fa-icon"></i>
+                        <p className="mt-4 text-xl font-semibold">AI Coach is analyzing performance...</p>
+                    </div>
+                );
+            }
+
+            const { finalFeedback, objectiveReport } = feedback;
+            const isError = finalFeedback.startsWith("Error:");
+
+            const parseMarkdown = (markdownText) => {
+                if (isError) {
+                    return `<p class="font-extrabold text-2xl text-red-700">${markdownText}</p>`;
+                }
+                
+                let html = '';
+                const lines = markdownText.split('\n');
+                let inList = false;
+
+                lines.forEach(line => {
+                    let processedLine = line;
+
+                    processedLine = processedLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    
+                    if (processedLine.startsWith('###')) {
+                        html += `<h3 class="font-extrabold text-lg text-indigo-600 mt-3 mb-1">${processedLine.substring(3).trim()}</h3>`;
+                    } else if (processedLine.startsWith('##')) {
+                        html += `<h2 class="font-extrabold text-xl text-indigo-700 block mt-5 mb-2 border-b border-indigo-200 pb-1">${processedLine.substring(2).trim()}</h2>`;
+                    } else if (processedLine.startsWith('#')) {
+                         html += `<h1 class="font-extrabold text-2xl text-indigo-800 block mt-5 mb-2">${processedLine.substring(1).trim()}</h1>`;
+                    }
+                    else if (processedLine.trim() === '---') {
+                        html += `<hr class="my-4 border-gray-300" />`;
+                    }
+                    else if (processedLine.trim().startsWith('*') || processedLine.trim().startsWith('-')) {
+                        if (!inList) {
+                            html += `<ul class="list-disc ml-6 mt-2 space-y-1">`;
+                            inList = true;
+                        }
+                        html += `<li class="text-base">${processedLine.substring(1).trim()}</li>`;
+                    } 
+                    else {
+                        if (inList) {
+                            html += `</ul>`;
+                            inList = false;
+                        }
+                        if (processedLine.trim() !== '') {
+                            // Enhanced detection for block headings
+                            if (processedLine.includes('PRIORITY FIX') || processedLine.includes('Overall Status') || processedLine.includes('ALERT') || processedLine.includes('SUMMARY')) {
+                                 html += `<p class="font-extrabold text-lg text-amber-600 block mt-4 mb-2">${processedLine.trim()}</p>`;
+                            } else if (processedLine.includes('BREAKDOWN') || processedLine.includes('COACHING TIPS')) {
+                                 html += `<p class="font-extrabold text-lg text-indigo-700 block mt-4 mb-2">${processedLine.trim()}</p>`;
+                            } else {
+                                html += `<p class="text-base mb-2">${processedLine.trim()}</p>`;
+                            }
+                        }
+                    }
+                });
+                
+                if (inList) {
+                    html += `</ul>`;
+                }
+
+                return html;
+            };
+
+            return (
+                <div className="space-y-6">
+                    <h3 className={`text-2xl font-extrabold ${isError ? 'text-red-600' : 'text-indigo-800'}`}>
+                        {selectedPersona} Feedback:
+                    </h3>
+
+                    <div className={`p-6 rounded-xl border ${isError ? 'bg-red-50 border-red-300 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-800'} whitespace-pre-wrap`}>
+                        <div 
+                            className="leading-relaxed"
+                            dangerouslySetInnerHTML={{ __html: parseMarkdown(finalFeedback) }} 
+                        />
+                    </div>
+
+                    <button 
+                        onClick={() => setRawVisible(!rawVisible)} 
+                        className="text-base text-gray-600 hover:text-indigo-600 transition-colors font-medium"
+                    >
+                        {rawVisible ? '▼ Hide Objective Report (LLM Input)' : '► Show Raw Objective Report (LLM Input)'}
+                    </button>
+                    
+                    {rawVisible && (
+                        <pre className="bg-gray-800 text-gray-200 p-4 rounded-xl text-xs overflow-auto shadow-inner">
+                            {objectiveReport}
+                        </pre>
+                    )}
+                </div>
+            );
+        };
+
+
+        // --- MAIN APPLICATION COMPONENT ---
+
+        const App = () => {
+            const [data, setData] = useState(null);
+            const [selectedPersona, setSelectedPersona] = useState("Data Scientist");
+            const [feedback, setFeedback] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [showMessage, setShowMessage] = useState(false);
+            const [messageContent, setMessageContent] = useState('');
+
+            const handleMessageBoxClose = () => {
+                setShowMessage(false);
+                setMessageContent('');
+            };
+
+            const showCustomMessage = (content) => {
+                setMessageContent(content);
+                setShowMessage(true);
+            };
+
+            const handleFileLoad = useCallback((loadedData) => {
+                setData(loadedData);
+                setFeedback(null); // Clear previous results on new data load
+            }, []);
+
+            const generateFeedback = useCallback(async () => {
+                if (!data) {
+                    showCustomMessage('Please load performance data first to generate feedback.');
+                    return;
+                }
+                
+                setLoading(true);
+                setFeedback(null);
+                
+                const systemInstruction = PERSONAS[selectedPersona].systemInstruction;
+                const objectiveReportData = generateObjectiveReport(data);
+
+                // Prompt includes explicit instruction to avoid LaTeX and start with an H1 title.
+                const fullPrompt = `Based on the following objective performance report for a workout, you must adopt the selected persona and provide detailed, actionable coaching feedback. Start your response with a clear, concise title using a markdown H1 heading (# TITLE). DO NOT use LaTeX commands like $...$ or \\frac{}{} for scores, percentages, or numbers. Use plain text and standard Unicode symbols (like the percent sign %).
+
+**OBJECTIVE PERFORMANCE DATA:**
+---
+${objectiveReportData}
+---`;
+
+                // Prepare the payload for the Gemini API
+                const payload = {
+                    contents: [{ parts: [{ text: fullPrompt }] }],
+                    systemInstruction: { parts: [{ text: systemInstruction }] },
+                };
+
+                let responseText = "Error: Failed to fetch response from API.";
+                let retryCount = 0;
+                const MAX_RETRIES = 3;
+
+                while (retryCount < MAX_RETRIES) {
+                    try {
+                        // Call the PHP proxy URL instead of the Google API URL
+                        const response = await fetch(PROXY_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`Proxy returned status ${response.status}`);
+                        }
+
+                        const result = await response.json();
+                        
+                        if (result.error) {
+                             throw new Error(result.error);
+                        }
+                        
+                        responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: LLM returned empty content.";
+                        break; // Success, exit loop
+                    } catch (error) {
+                        console.error(`Attempt ${retryCount + 1} failed:`, error);
+                        // Show a detailed error message to the user if the proxy or API failed
+                        if (retryCount === MAX_RETRIES - 1) {
+                            responseText = `Error: Could not retrieve feedback after ${MAX_RETRIES} attempts. Details: ${error.message}. Check the gemini_proxy.php file and your API Key.`;
+                        }
+                        if (retryCount < MAX_RETRIES - 1) {
+                            const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        }
+                        retryCount++;
+                    }
+                }
+
+                setFeedback({
+                    finalFeedback: responseText,
+                    objectiveReport: objectiveReportData // Keep the original objective data
+                });
+                setLoading(false);
+            }, [data, selectedPersona]);
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+                    {showMessage && (
+                        <CustomMessage content={messageContent} onClose={handleMessageBoxClose} />
+                    )}
+                    <header className="text-center mb-8 pb-4 border-b-4 border-indigo-200">
+                        <h1 className="text-4xl sm:text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-indigo-700 to-indigo-500 flex items-center justify-center">
+                            <i className="fa-solid fa-bolt w-10 h-10 mr-3 text-amber-500 fa-icon"></i>
+                            CoachAI Platform
+                        </h1>
+                        <p className="text-gray-600 mt-2 text-lg">Personalized Form Analysis powered by Gemini.</p>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto shadow-2xl rounded-3xl overflow-hidden bg-white">
+                        <div className="grid grid-cols-1 lg:grid-cols-3">
+                            {/* Left Column (Inputs/Sidebar) - Premium look */}
+                            <div className="lg:col-span-1 p-6 sm:p-8 bg-indigo-700 space-y-8 h-full">
+                                
+                                {/* Current Score Display (New Dynamic Element) */}
+                                <div className="p-6 bg-indigo-800 rounded-xl shadow-inner text-white text-center">
+                                    <h2 className="text-2xl font-extrabold mb-4">Live Performance Score</h2>
+                                    {data ? (
+                                        <ScoreGauge score={data.scores.overall} />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-40 text-indigo-300">
+                                            <i className="fa-solid fa-circle-notch fa-spin text-4xl mb-2"></i>
+                                            <p className="text-lg font-medium">Load data to view score</p>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <FileInput onFileLoad={handleFileLoad} loading={loading} />
+
+                                {/* Persona Selection - Updated styling */}
+                                <div className="p-6 bg-white rounded-2xl shadow-xl">
+                                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                                        <i className="fa-solid fa-user-check w-6 h-6 mr-2 text-indigo-600 fa-icon"></i>
+                                        2. Select Your Coach Persona
+                                    </h2>
+                                    <div className="space-y-4">
+                                        {Object.entries(PERSONAS).map(([name, config]) => (
+                                            <PersonaCard 
+                                                key={name}
+                                                name={name}
+                                                desc={config.desc}
+                                                icon={config.icon}
+                                                color={config.color}
+                                                selected={selectedPersona === name}
+                                                onClick={() => setSelectedPersona(name)}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right Column (Output) */}
+                            <div className="lg:col-span-2 p-6 sm:p-8 space-y-8 bg-white h-full">
+                                <h2 className="text-2xl font-extrabold text-indigo-800">3. Generate & Receive Coaching</h2>
+                                <button
+                                    onClick={generateFeedback}
+                                    disabled={!data || loading}
+                                    className={`w-full py-4 px-6 text-xl font-extrabold rounded-xl transition-all duration-300 mb-6 flex items-center justify-center transform hover:scale-[1.005] ${
+                                        data && !loading ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-xl shadow-indigo-400/50' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                    }`}
+                                >
+                                    {loading ? (
+                                        <>
+                                            <i className="fa-solid fa-sync-alt w-6 h-6 mr-3 animate-spin fa-icon"></i>
+                                            Analyzing Performance...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-brain w-6 h-6 mr-3 fa-icon"></i>
+                                            Generate Personalized Feedback
+                                        </>
+                                    )}
+                                </button>
+                                <div className="min-h-[400px] border-t border-gray-200 pt-6">
+                                    <ResultsDisplay feedback={feedback} loading={loading} selectedPersona={selectedPersona} />
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        // Render the application to the root element
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+    </script>
+</body>
+</html>

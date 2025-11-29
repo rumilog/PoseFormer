@@ -1,0 +1,52 @@
+{
+  "status": "success",
+  "exercise": {
+    "type": "pushup",
+    "reference": "pushup",
+    "user_video": "user.mp4"
+  },
+  "scores": {
+    "overall": 5.88,
+    "relevant": 13.33,
+    "body_parts": {
+      "core": 33.33,
+      "right_arm": 0.0,
+      "left_arm": 0.0,
+      "torso": 20.0
+    }
+  },
+  "metrics": {
+    "frames": {
+      "user": 300,
+      "reference": 325,
+      "aligned": 325
+    },
+    "alignment_quality": 0.318,
+    "body_part_details": {
+      "right_arm": {
+        "position_error_avg": 0.8837,
+        "position_error_max": 1.5918,
+        "tolerance_threshold": 0.02,
+        "in_tolerance_percentage": 0.0
+      },
+      "left_arm": {
+        "position_error_avg": 0.5523,
+        "position_error_max": 1.1628,
+        "tolerance_threshold": 0.02,
+        "in_tolerance_percentage": 0.0
+      },
+      "torso": {
+        "position_error_avg": 0.7517,
+        "position_error_max": 1.9766,
+        "tolerance_threshold": 0.02,
+        "in_tolerance_percentage": 20.0
+      },
+      "core": {
+        "position_error_avg": 0.4419,
+        "position_error_max": 1.4002,
+        "tolerance_threshold": 0.02,
+        "in_tolerance_percentage": 33.3
+      }
+    }
+  }
+}

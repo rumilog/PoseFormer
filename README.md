@@ -149,6 +149,39 @@ This project builds on PoseFormerV2:
 }
 ```
 
+## How Reference Processing Works
+
+On first run, if processed reference data doesn't exist, the system automatically:
+
+1. **Detects people** in the reference video using YOLOv3
+2. **Extracts 2D poses** using HRNet (17 keypoints per frame)
+3. **Lifts to 3D** using PoseFormerV2 transformer model
+4. **Generates noisy samples** - creates variations of the reference poses for robust scoring
+5. **Calculates statistical bounds** - computes tolerance ranges for each joint
+
+This generates four files in `references/<exercise>/`:
+- `keypoints_3D.npz` - The extracted 3D pose sequence
+- `noisy_samples.npz` - Augmented pose variations for scoring
+- `statistical_bounds.npz` - Mean poses and tolerance bounds
+- `metadata.json` - Exercise info and processing details
+
+## Acknowledgments
+
+### AI Assistance
+This codebase was developed with significant assistance from **Claude (Anthropic)** as an AI coding helper. Claude assisted with:
+- Code architecture and design
+- Debugging and error resolution
+- Documentation writing
+- Integration of pose estimation pipeline with fitness coaching logic
+
+### PoseFormerV2
+The 3D pose estimation is powered by [PoseFormerV2](https://github.com/QitaoZhao/PoseFormerV2), a state-of-the-art transformer-based model for lifting 2D poses to 3D.
+
+### Other Dependencies
+- [HRNet](https://github.com/leoxiaobin/deep-high-resolution-net.pytorch) for 2D pose estimation
+- [YOLOv3](https://pjreddie.com/darknet/yolo/) for person detection
+- [MHFormer](https://github.com/Vegetebird/MHFormer) for video demo pipeline structure
+
 ## License
 
 MIT License

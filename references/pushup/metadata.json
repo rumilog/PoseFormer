@@ -1,0 +1,15 @@
+{
+  "exercise_type": "pushup",
+  "video_path": "demo\\video\\How to do a Push-Up  Proper Form & Technique  NASM - National Academy of Sports Medicine (NASM) (1080p, h264).mp4",
+  "video_name": "How to do a Push-Up  Proper Form & Technique  NASM - National Academy of Sports Medicine (NASM) (1080p, h264)",
+  "num_frames": 325,
+  "body_scale": 0.4316239655017853,
+  "relevant_body_parts": [
+    "core",
+    "right_arm",
+    "left_arm",
+    "torso"
+  ],
+  "n_samples": 50,
+  "timestamp": "1763344983.9045405"
+}

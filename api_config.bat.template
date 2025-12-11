@@ -1,0 +1,15 @@
+@echo off
+REM API Configuration Template
+REM 1. Copy this file to: api_config.bat
+REM 2. Replace YOUR_API_KEY_HERE with your actual Gemini API key
+REM 3. The api_config.bat file is gitignored and won't be committed
+
+set GEMINI_API_KEY=YOUR_API_KEY_HERE
+
+REM Get your free API key at: https://makersuite.google.com/app/apikey
+
+
+
+
+
+

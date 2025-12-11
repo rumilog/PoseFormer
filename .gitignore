@@ -1,0 +1,58 @@
+# Large model weights - download separately
+demo/lib/checkpoint/*.bin
+demo/lib/checkpoint/*.pth
+demo/lib/checkpoint/*.weights
+
+# Processed outputs - auto-generated on first run
+demo/output/
+user_videos_cache/
+temp_user_processing/
+references/*/temp_processing*/
+references/*/*.npz
+
+# Fine-tuned models - load from HuggingFace instead
+models/
+
+# Cache
+__pycache__/
+*.pyc
+
+# Videos and media (keep reference video)
+*.mp4
+*.gif
+*.avi
+!demo/video/*.mp4
+
+# Config with secrets
+config.txt
+api_config.bat
+
+# Test and temporary files
+*.json
+!references/*/metadata.json
+*.log
+*.tmp
+
+# Documentation (not needed for running)
+*.md
+
+# Scripts and utilities not needed for main app
+scripts/
+mpi_inf_3dhp/
+public_html*/
+images/
+data/
+
+# Test files
+test_*.py
+check_*.py
+verify_*.py
+merge_*.py
+reorganize_*.py
+prepare_*.py
+
+# Batch files except main runner
+*.bat
+*.cmd
+!run_full_app.bat
+!api_config.bat.template

@@ -175,7 +175,7 @@ This codebase was developed with significant assistance from **Claude (Anthropic
 - Integration of pose estimation pipeline with fitness coaching logic
 
 ### PoseFormerV2
-The 3D pose estimation is powered by [PoseFormerV2](https://github.com/QitaoZhao/PoseFormerV2), a state-of-the-art transformer-based model for lifting 2D poses to 3D.
+**This repository builds upon the original [PoseFormerV2](https://github.com/QitaoZhao/PoseFormerV2) created by [Qitao Zhao](https://github.com/QitaoZhao) and collaborators.** PoseFormerV2 is a state-of-the-art transformer-based model for lifting 2D poses to 3D, published at CVPR 2023. The fitness coaching functionality was added on top of their excellent pose estimation foundation.
 
 ### Other Dependencies
 - [HRNet](https://github.com/leoxiaobin/deep-high-resolution-net.pytorch) for 2D pose estimation
